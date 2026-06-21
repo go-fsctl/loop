@@ -1,0 +1,6 @@
+# Build artifacts
+/loopprobe
+*.test
+*.out
+# Editor/OS cruft
+.DS_Store
