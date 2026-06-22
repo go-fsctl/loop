@@ -2,6 +2,7 @@
 
 [![Go Reference](https://pkg.go.dev/badge/github.com/go-fsctl/loop.svg)](https://pkg.go.dev/github.com/go-fsctl/loop)
 [![License: BSD-3-Clause](https://img.shields.io/badge/license-BSD--3--Clause-blue)](LICENSE)
+[![CI](https://github.com/go-fsctl/loop/actions/workflows/ci.yml/badge.svg)](https://github.com/go-fsctl/loop/actions/workflows/ci.yml)
 
 Pure-Go Linux loop-device control: attach, configure, inspect, and detach
 loop devices directly through `/dev/loop-control` and the `LOOP_*` ioctls —
