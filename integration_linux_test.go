@@ -136,6 +136,29 @@ func TestReadOnlyAttach(t *testing.T) {
 	}
 }
 
+// TestCtlAddRemove drives the real /dev/loop-control LOOP_CTL_ADD / LOOP_CTL_REMOVE
+// path (and thus the raw ioctlRetIntArg syscall wrapper) by creating and
+// destroying a high-numbered loop device unlikely to collide with the host.
+func TestCtlAddRemove(t *testing.T) {
+	requireLoop(t)
+	const n = 1000
+	_ = CtlRemove(n) // best-effort clean slate from a prior aborted run
+
+	got, err := CtlAdd(n)
+	if err != nil {
+		t.Fatalf("CtlAdd(%d): %v", n, err)
+	}
+	if got != n {
+		t.Errorf("CtlAdd(%d) = %d, want %d", n, got, n)
+	}
+	if _, err := os.Stat("/dev/loop1000"); err != nil {
+		t.Errorf("CtlAdd did not create /dev/loop1000: %v", err)
+	}
+	if err := CtlRemove(n); err != nil {
+		t.Errorf("CtlRemove(%d): %v", n, err)
+	}
+}
+
 // TestDetachNonLoop confirms detaching a non-loop path fails cleanly (the
 // LOOP_CLR_FD ioctl returns ENOTTY) rather than panicking.
 func TestDetachNonLoop(t *testing.T) {

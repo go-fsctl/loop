@@ -103,7 +103,7 @@ func (i Info) PartScan() bool { return i.Flags&LO_FLAGS_PARTSCAN != 0 }
 // /dev/loop-control exists. It does not check for the CAP_SYS_ADMIN privilege
 // the actual ioctls require.
 func Available() bool {
-	_, err := os.Stat(devLoopControl)
+	_, err := osStat(devLoopControl)
 	return err == nil
 }
 
@@ -117,13 +117,13 @@ func Available() bool {
 // on older kernels, or if LOOP_CONFIGURE is unavailable, it falls back to
 // LOOP_SET_FD followed by LOOP_SET_STATUS64.
 func Attach(imagePath string, opt Options) (devPath string, err error) {
-	ctl, err := os.OpenFile(devLoopControl, os.O_RDWR, 0)
+	ctl, err := osOpenFile(devLoopControl, os.O_RDWR, 0)
 	if err != nil {
 		return "", fmt.Errorf("loop: open %s: %w", devLoopControl, err)
 	}
 	defer ctl.Close()
 
-	n, err := unix.IoctlRetInt(int(ctl.Fd()), unix.LOOP_CTL_GET_FREE)
+	n, err := ioctlRetInt(int(ctl.Fd()), unix.LOOP_CTL_GET_FREE)
 	if err != nil {
 		return "", fmt.Errorf("loop: LOOP_CTL_GET_FREE: %w", err)
 	}
@@ -133,13 +133,13 @@ func Attach(imagePath string, opt Options) (devPath string, err error) {
 	if opt.ReadOnly {
 		backingFlags = os.O_RDONLY
 	}
-	backing, err := os.OpenFile(imagePath, backingFlags, 0)
+	backing, err := osOpenFile(imagePath, backingFlags, 0)
 	if err != nil {
 		return "", fmt.Errorf("loop: open backing file %s: %w", imagePath, err)
 	}
 	defer backing.Close()
 
-	dev, err := os.OpenFile(devPath, os.O_RDWR, 0)
+	dev, err := osOpenFile(devPath, os.O_RDWR, 0)
 	if err != nil {
 		return "", fmt.Errorf("loop: open %s: %w", devPath, err)
 	}
@@ -147,7 +147,7 @@ func Attach(imagePath string, opt Options) (devPath string, err error) {
 
 	if err := configure(int(dev.Fd()), int(backing.Fd()), imagePath, opt); err != nil {
 		// Best-effort teardown so we do not leak a half-configured device.
-		_ = unix.IoctlSetInt(int(dev.Fd()), unix.LOOP_CLR_FD, 0)
+		_ = ioctlSetInt(int(dev.Fd()), unix.LOOP_CLR_FD, 0)
 		return "", err
 	}
 	return devPath, nil
@@ -167,7 +167,7 @@ func configure(devFd, backingFd int, imagePath string, opt Options) error {
 	}
 	copyName(&cfg.Info.File_name, imagePath)
 
-	err := unix.IoctlLoopConfigure(devFd, &cfg)
+	err := ioctlLoopConfigure(devFd, &cfg)
 	if err == nil {
 		return nil
 	}
@@ -176,7 +176,7 @@ func configure(devFd, backingFd int, imagePath string, opt Options) error {
 	}
 
 	// Legacy fallback: associate the backing fd, then push status/flags.
-	if err := unix.IoctlSetInt(devFd, unix.LOOP_SET_FD, backingFd); err != nil {
+	if err := ioctlSetInt(devFd, unix.LOOP_SET_FD, backingFd); err != nil {
 		return fmt.Errorf("loop: LOOP_SET_FD: %w", err)
 	}
 	if opt.Offset != 0 || opt.SizeLimit != 0 || opt.flags() != 0 {
@@ -186,8 +186,8 @@ func configure(devFd, backingFd int, imagePath string, opt Options) error {
 			Flags:     opt.flags(),
 		}
 		copyName(&st.File_name, imagePath)
-		if err := unix.IoctlLoopSetStatus64(devFd, &st); err != nil {
-			_ = unix.IoctlSetInt(devFd, unix.LOOP_CLR_FD, 0)
+		if err := ioctlLoopSetStatus64(devFd, &st); err != nil {
+			_ = ioctlSetInt(devFd, unix.LOOP_CLR_FD, 0)
 			return fmt.Errorf("loop: LOOP_SET_STATUS64: %w", err)
 		}
 	}
@@ -211,12 +211,12 @@ func copyName(dst *[loNameSize]uint8, name string) {
 // defer the teardown until the last opener of the device closes it; in that
 // case the device disappears asynchronously.
 func Detach(devPath string) error {
-	dev, err := os.OpenFile(devPath, os.O_RDONLY, 0)
+	dev, err := osOpenFile(devPath, os.O_RDONLY, 0)
 	if err != nil {
 		return fmt.Errorf("loop: open %s: %w", devPath, err)
 	}
 	defer dev.Close()
-	if err := unix.IoctlSetInt(int(dev.Fd()), unix.LOOP_CLR_FD, 0); err != nil {
+	if err := ioctlSetInt(int(dev.Fd()), unix.LOOP_CLR_FD, 0); err != nil {
 		return fmt.Errorf("loop: LOOP_CLR_FD %s: %w", devPath, err)
 	}
 	return nil
@@ -225,12 +225,12 @@ func Detach(devPath string) error {
 // SetCapacity makes the loop device re-read the size of its backing file
 // (LOOP_SET_CAPACITY). Use it after the backing file has been grown.
 func SetCapacity(devPath string) error {
-	dev, err := os.OpenFile(devPath, os.O_RDONLY, 0)
+	dev, err := osOpenFile(devPath, os.O_RDONLY, 0)
 	if err != nil {
 		return fmt.Errorf("loop: open %s: %w", devPath, err)
 	}
 	defer dev.Close()
-	if err := unix.IoctlSetInt(int(dev.Fd()), unix.LOOP_SET_CAPACITY, 0); err != nil {
+	if err := ioctlSetInt(int(dev.Fd()), unix.LOOP_SET_CAPACITY, 0); err != nil {
 		return fmt.Errorf("loop: LOOP_SET_CAPACITY %s: %w", devPath, err)
 	}
 	return nil
@@ -239,13 +239,13 @@ func SetCapacity(devPath string) error {
 // Status reads the configuration of the loop device at devPath via
 // LOOP_GET_STATUS64 and decodes the fields callers care about.
 func Status(devPath string) (Info, error) {
-	dev, err := os.OpenFile(devPath, os.O_RDONLY, 0)
+	dev, err := osOpenFile(devPath, os.O_RDONLY, 0)
 	if err != nil {
 		return Info{}, fmt.Errorf("loop: open %s: %w", devPath, err)
 	}
 	defer dev.Close()
 
-	st, err := unix.IoctlLoopGetStatus64(int(dev.Fd()))
+	st, err := ioctlLoopGetStatus64(int(dev.Fd()))
 	if err != nil {
 		return Info{}, fmt.Errorf("loop: LOOP_GET_STATUS64 %s: %w", devPath, err)
 	}
@@ -280,12 +280,12 @@ func indexByte(b []uint8, c uint8) int {
 // /sys/block/loopN/loop/backing_file. The returned slice is empty (not nil-
 // erroring) when nothing matches.
 func FindByBacking(path string) ([]string, error) {
-	abs, err := filepath.Abs(path)
+	abs, err := filepathAbs(path)
 	if err != nil {
 		return nil, fmt.Errorf("loop: resolve %s: %w", path, err)
 	}
 
-	entries, err := os.ReadDir(sysBlock)
+	entries, err := osReadDir(sysBlock)
 	if err != nil {
 		return nil, fmt.Errorf("loop: read %s: %w", sysBlock, err)
 	}
@@ -297,7 +297,7 @@ func FindByBacking(path string) ([]string, error) {
 			continue
 		}
 		bfPath := filepath.Join(sysBlock, name, "loop", "backing_file")
-		data, err := os.ReadFile(bfPath)
+		data, err := osReadFile(bfPath)
 		if err != nil {
 			// Not an attached loop device (no loop/ subdir) — skip.
 			continue
@@ -316,12 +316,12 @@ func FindByBacking(path string) ([]string, error) {
 // returns the device number assigned by the kernel (n). It fails with EEXIST if
 // the device already exists. The index is passed as the ioctl argument.
 func CtlAdd(n int) (int, error) {
-	ctl, err := os.OpenFile(devLoopControl, os.O_RDWR, 0)
+	ctl, err := osOpenFile(devLoopControl, os.O_RDWR, 0)
 	if err != nil {
 		return 0, fmt.Errorf("loop: open %s: %w", devLoopControl, err)
 	}
 	defer ctl.Close()
-	ret, err := ioctlRetIntArg(int(ctl.Fd()), unix.LOOP_CTL_ADD, n)
+	ret, err := ioctlRetIntArgFn(int(ctl.Fd()), unix.LOOP_CTL_ADD, n)
 	if err != nil {
 		return 0, fmt.Errorf("loop: LOOP_CTL_ADD %d: %w", n, err)
 	}
@@ -343,12 +343,12 @@ func ioctlRetIntArg(fd int, req uint, arg int) (int, error) {
 // CtlRemove destroys the unused /dev/loopN with index n via LOOP_CTL_REMOVE. It
 // fails with EBUSY if the device is currently bound to a backing file.
 func CtlRemove(n int) error {
-	ctl, err := os.OpenFile(devLoopControl, os.O_RDWR, 0)
+	ctl, err := osOpenFile(devLoopControl, os.O_RDWR, 0)
 	if err != nil {
 		return fmt.Errorf("loop: open %s: %w", devLoopControl, err)
 	}
 	defer ctl.Close()
-	if err := unix.IoctlSetInt(int(ctl.Fd()), unix.LOOP_CTL_REMOVE, n); err != nil {
+	if err := ioctlSetInt(int(ctl.Fd()), unix.LOOP_CTL_REMOVE, n); err != nil {
 		return fmt.Errorf("loop: LOOP_CTL_REMOVE %d: %w", n, err)
 	}
 	return nil
