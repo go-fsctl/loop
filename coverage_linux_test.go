@@ -379,17 +379,28 @@ func TestFlagsAndLoopIO(t *testing.T) {
 	}
 }
 
-// TestIoctlRetIntArgError covers the raw-syscall wrapper's errno branch
-// deterministically: a bogus request on a regular file fd yields ENOTTY. Its
-// success branch is exercised by the root integration test via CtlAdd.
-func TestIoctlRetIntArgError(t *testing.T) {
+// TestIoctlRetIntArg covers both branches of the raw-syscall wrapper without
+// root: a bogus request on a regular file fd yields ENOTTY (error branch), and
+// FIOCLEX — which sets close-on-exec, ignores its integer argument, and returns
+// 0 for any fd unprivileged — exercises the success branch. The success half is
+// skipped under -test.short so the emulated (QEMU) CI jobs never issue a real
+// ioctl; the native job (no -short) covers it.
+func TestIoctlRetIntArg(t *testing.T) {
 	f, err := os.CreateTemp(t.TempDir(), "fd")
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer f.Close()
+
 	if _, err := ioctlRetIntArg(int(f.Fd()), 0xDEAD, 0); err == nil {
 		t.Fatal("want errno from bogus ioctl request")
+	}
+
+	if testing.Short() {
+		t.Skip("skip the real FIOCLEX ioctl under -short (emulated CI)")
+	}
+	if _, err := ioctlRetIntArg(int(f.Fd()), 0x5451 /* FIOCLEX */, 0); err != nil {
+		t.Fatalf("ioctlRetIntArg FIOCLEX: %v", err)
 	}
 }
 
