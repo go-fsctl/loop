@@ -52,6 +52,9 @@ info, err := loop.Status(dev)
 // Find devices backed by a given file (scans /sys/block/loop*/loop/backing_file):
 devs, err := loop.FindByBacking("/path/to/disk.img")
 
+// Extract the numeric index from a device path:
+n, err := loop.DeviceNumber(dev) // "/dev/loop3" -> 3
+
 // Re-read the backing file size after growing it (LOOP_SET_CAPACITY):
 err = loop.SetCapacity(dev)
 
